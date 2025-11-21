@@ -5,3 +5,6 @@ out_tspl/*.png
 tmp_tspl/*.png
 *.pdf
 *.png
+.vscode/
+*.go_
+build/
