@@ -25,13 +25,15 @@ import (
 
 // ----------------- Defaults (overridable via CLI or CUPS options) -------------
 var (
-	DPI        = 200
-	LABEL_W_MM = 100.0
-	LABEL_H_MM = 150.0
-	MM_TO_IN   = 0.0393701
-	MARGIN_MM  = 2.0
-	GAP_MM     = 2.0
-	DELAY_MS   = 200
+	DPI                  = 200
+	LABEL_W_MM           = 100.0
+	LABEL_H_MM           = 150.0
+	MM_TO_IN             = 0.0393701
+	MARGIN_MM            = 2.0
+	GAP_MM               = 2.0
+	DELAY_MS             = 200
+	SAFE_MARGIN_RIGHT_MM = 4.0
+	SAFE_MARGIN_RIGHT_PX = int(math.Round(SAFE_MARGIN_RIGHT_MM * MM_TO_IN * float64(DPI)))
 )
 
 var (
@@ -88,18 +90,38 @@ func pdfToPngPages(pdfPath string, tmpDir string) ([]string, error) {
 	return pages, nil
 }
 
-// // ------------------------------------------------------------
-// // Crop an A4 page PNG into labels of size PX_W x PX_H (pixels)
-// // This function handles partial labels at the bottom by centering
-// // and filling with white background instead of failing.
-// // Returns a slice of file paths (saved PNGs) for debugging and further processing.
-// // ------------------------------------------------------------
+func isImageBlank(img image.Image, threshold uint8) bool {
+	bounds := img.Bounds()
+	whitePixels := 0
+	totalPixels := (bounds.Dx() * bounds.Dy())
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			// Normalizar para 0-255
+			r = r >> 8
+			g = g >> 8
+			b = b >> 8
+			a = a >> 8
+
+			// Considerar pixel como branco se RGB > threshold e A = 255
+			if r > uint32(threshold) && g > uint32(threshold) && b > uint32(threshold) && a == 255 {
+				whitePixels++
+			}
+		}
+	}
+
+	// Se mais de 95% da imagem é branca, considera em branco
+	return float64(whitePixels)/float64(totalPixels) > 0.95
+}
+
 func cropToLabels(pagePng string, outDir string) ([]string, error) {
 	logInfo("Cropping page %s into labels (px %dx%d)...", pagePng, PX_W, PX_H)
 	img, err := imaging.Open(pagePng)
 	if err != nil {
 		return nil, err
 	}
+
 	b := img.Bounds()
 	pageW := b.Dx()
 	pageH := b.Dy()
@@ -108,46 +130,105 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 	logInfo("Label size: %dx%d pixels", PX_W, PX_H)
 	logInfo("Margin: %dmm = %dpx", int(MARGIN_MM), MARGIN_PX)
 
-	rows := int(math.Ceil(float64(pageH) / float64(PX_H)))
+	// Grid 2x2 (até 4 labels por página)
+	rows := 2
+	cols := 2
 
-	logInfo("Calculated rows: %d (pageH=%d / PX_H=%d = %d)", rows, pageH, PX_H, pageH/PX_H)
-	logInfo("Remainder: %d pixels", pageH%PX_H)
+	// Calcular quantas labels cabem realmente (limitado a 2 linhas, 2 colunas)
+	maxRows := int(math.Ceil(float64(pageH) / float64(PX_H)))
+	if maxRows < rows {
+		rows = maxRows
+	}
+
+	maxCols := int(math.Ceil(float64(pageW) / float64(PX_W)))
+	if maxCols < cols {
+		cols = maxCols
+	}
+
+	logInfo("Grid: %d rows x %d cols (max based on page: %dx%d)", rows, cols, maxRows, maxCols)
 
 	var labels []string
+	labelIndex := 1
+
 	for r := 0; r < rows; r++ {
-		left := 0
-		top := r * PX_H
+		for c := 0; c < cols; c++ {
+			left := c * PX_W
+			top := r * PX_H
 
-		logInfo("Cropping label %d at position: left=%d top=%d (size: %dx%d)",
-			r+1, left, top, PX_W, PX_H)
+			// Aplicar margem segura para coluna direita (c=1)
+			if c == 1 {
+				left += SAFE_MARGIN_RIGHT_PX + 25
+			} else if c == 0 {
+				left += SAFE_MARGIN_RIGHT_PX - 25
+			}
 
-		rect := image.Rect(left, top, left+PX_W, top+PX_H)
-		cropped := imaging.Crop(img, rect)
-		// ensure exact size
-		cropped = imaging.Resize(cropped, PX_W, PX_H, imaging.Lanczos)
+			// Validar se está dentro dos limites
+			if left >= pageW || top >= pageH {
+				logInfo("Label position %d skipped: out of bounds (left=%d top=%d, page=%dx%d)", labelIndex, left, top, pageW, pageH)
+				labelIndex++
+				continue
+			}
 
-		innerW := PX_W - (2 * MARGIN_PX)
-		innerH := PX_H - (2 * MARGIN_PX)
+			// Ajustar rect para não ultrapassar limites
+			right := left + PX_W
+			bottom := top + PX_H
 
-		cropped = imaging.Fit(cropped, innerW, innerH, imaging.Lanczos)
+			if right > pageW {
+				right = pageW
+			}
+			if bottom > pageH {
+				bottom = pageH
+			}
 
-		canvas := imaging.New(PX_W, PX_H, color.NRGBA{255, 255, 255, 255})
+			logInfo("Cropping label %d at position: left=%d top=%d right=%d bottom=%d (size: %dx%d)",
+				labelIndex, left, top, right, bottom, right-left, bottom-top)
 
-		canvas = imaging.PasteCenter(canvas, cropped)
+			rect := image.Rect(left, top, right, bottom)
+			cropped := imaging.Crop(img, rect)
 
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, canvas); err != nil {
-			return nil, err
+			// Verificar se está em branco antes de processar
+			if isImageBlank(cropped, 240) {
+				logInfo("Label %d is blank, skipping", labelIndex)
+				labelIndex++
+				continue
+			}
+
+			// Redimensionar para tamanho exato (PX_W x PX_H)
+			cropped = imaging.Resize(cropped, PX_W, PX_H, imaging.Lanczos)
+
+			// Aplicar margens
+			innerW := PX_W - (2 * MARGIN_PX)
+			innerH := PX_H - (2 * MARGIN_PX)
+
+			if innerW > 0 && innerH > 0 {
+				cropped = imaging.Fit(cropped, innerW, innerH, imaging.Lanczos)
+			}
+
+			// Canvas branco com label centralizada
+			canvas := imaging.New(PX_W, PX_H, color.NRGBA{255, 255, 255, 255})
+			canvas = imaging.PasteCenter(canvas, cropped)
+
+			var buf bytes.Buffer
+			if err := png.Encode(&buf, canvas); err != nil {
+				return nil, err
+			}
+
+			buffer := buf.Bytes()
+			outPath := filepath.Join(outDir, fmt.Sprintf("%02d_label%02d.png", time.Now().UnixMilli(), labelIndex))
+
+			if err := ioutil.WriteFile(outPath, buffer, 0o644); err != nil {
+				logInfo("Error writing file %s: %v", outPath, err)
+				labelIndex++
+				continue
+			}
+
+			logInfo("Saved label %d: %s", labelIndex, outPath)
+			labels = append(labels, outPath)
+			labelIndex++
 		}
-
-		buffer := buf.Bytes()
-
-		outPath := filepath.Join(outDir, fmt.Sprintf("%02d_label%02d.png", time.Now().UnixMilli(), r+1))
-		_ = ioutil.WriteFile(outPath, buffer, 0o644)
-
-		labels = append(labels, outPath)
 	}
-	logInfo("Cropped into %d labels", len(labels))
+
+	logInfo("Cropped into %d non-blank labels from page", len(labels))
 	return labels, nil
 }
 
@@ -522,7 +603,21 @@ func modeBackend(argv []string) error {
 	if err := writeToPrinter(tspl, dev); err != nil {
 		return fmt.Errorf("writeToPrinter: %w", err)
 	}
+
 	return nil
+}
+
+func clearTempFiles() {
+	tmpDirs := []string{"./tmp_tspl", "./out_tspl", "/tmp/tspl_filter", "/tmp/tspl_pages", "/tmp/tspl_labels"}
+	for _, dir := range tmpDirs {
+		files, err := ioutil.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			os.Remove(filepath.Join(dir, f.Name()))
+		}
+	}
 }
 
 func modeCLI(pdfPath string, printer string, options string) error {
