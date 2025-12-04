@@ -2,6 +2,10 @@
 
 Complete driver for thermal printers using TSPL language (TSC, Zebra, etc.) with CUPS support and CLI mode.
 
+## Demo
+
+![Driver in action](./assets/running.gif)
+
 ## Features
 
 - **Two printing modes**:
@@ -227,6 +231,34 @@ sudo usermod -aG lp $USER
 - For SLICE MODE: Adjust margins in code (`MARGIN_MM`, `SAFE_MARGIN_RIGHT_MM`)
 - For FULL PAGE: Use correct PageSize matching physical label size
 
+### CUPS asks for authentication / Job pauses
+
+This happens when the backend has wrong permissions:
+
+```bash
+# Check backend permissions
+ls -la /usr/lib/cups/backend/tspl
+
+# Should show: -rwx------ (700), owned by root:root
+# If it shows 755, fix it:
+sudo chmod 700 /usr/lib/cups/backend/tspl
+sudo chown root:root /usr/lib/cups/backend/tspl
+sudo systemctl restart cups
+```
+
+### Job completes but nothing prints
+
+Check the CUPS logs for errors:
+
+```bash
+sudo tail -50 /var/log/cups/error_log | grep -E "\[Job"
+```
+
+Common issues:
+- Backend not receiving data from filter
+- USB device permissions
+- Wrong device path (check with `ls /dev/usb/lp*`)
+
 ## Architecture
 
 ```
@@ -241,7 +273,7 @@ sudo usermod -aG lp $USER
                       │
                       ▼
                  ┌────────────────────────┐
-                 │   tspl-thermal Filter │◄──── PageSize option
+                 │   tspl-filter         │◄──── PageSize option
                  │   (PDF → TSPL)        │
                  └────────────┬───────────┘
                       │
@@ -283,15 +315,18 @@ sudo usermod -aG lp $USER
 
 ### Components
 
-1. **Filter** (`/usr/lib/cups/filter/tspl-thermal`)
+1. **Filter** (`/usr/lib/cups/filter/tspl-filter`)
      - Converts PDF to TSPL
      - Detects PageSize and activates appropriate mode
      - Generates commands: SIZE, GAP, BITMAP, PRINT
+     - Permissions: **755** (readable/executable by all)
 
 2. **Backend** (`/usr/lib/cups/backend/tspl`)
      - Sends TSPL to printer
      - Manages retry/backoff for USB
      - 512-byte chunking with delay
+     - Permissions: **700** (root only - CRITICAL!)
+     - ⚠️ If permissions are 755, CUPS will ask for authentication!
 
 3. **PPD** (`/usr/share/ppd/custom/tspl-thermal.ppd`)
      - Defines printer capabilities

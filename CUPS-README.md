@@ -148,6 +148,24 @@ sudo usermod -aG lp $USER
 newgrp lp
 ```
 
+### CUPS asking for authentication / Job pauses
+
+If CUPS asks for credentials or jobs pause immediately, it's likely a backend permission issue:
+
+```bash
+# Backend MUST have 700 permissions (root-only)
+ls -la /usr/lib/cups/backend/tspl
+# Should show: -rwx------ 1 root root
+
+# If permissions are wrong (755), fix them:
+sudo chmod 700 /usr/lib/cups/backend/tspl
+
+# Restart CUPS
+sudo systemctl restart cups
+```
+
+**Why?** CUPS considers backends with world-readable permissions (755) as "insecure" and requires authentication to use them.
+
 ### Check logs
 
 ```bash
@@ -165,7 +183,7 @@ sudo journalctl -u cups -f
 sudo lpadmin -x TSPLPrinter
 
 # Remove files
-sudo rm -f /usr/lib/cups/filter/tspl-thermal
+sudo rm -f /usr/lib/cups/filter/tspl-filter
 sudo rm -f /usr/lib/cups/backend/tspl
 sudo rm -f /usr/share/ppd/custom/tspl-thermal.ppd
 
@@ -215,20 +233,21 @@ Send to /dev/usb/lpX
 
 ### Components
 
-- **Filter** (`/usr/lib/cups/filter/tspl-thermal`): Converts PDF → TSPL
+- **Filter** (`/usr/lib/cups/filter/tspl-filter`): Converts PDF → TSPL (permissions: 755)
   - Detects PageSize from CUPS options
   - Activates SLICE_MODE for A4, FULL PAGE for labels
   - Generates TSPL commands (SIZE, GAP, BITMAP, PRINT)
 
-- **Backend** (`/usr/lib/cups/backend/tspl`): Sends TSPL → device
+- **Backend** (`/usr/lib/cups/backend/tspl`): Sends TSPL → device (permissions: 700)
   - Reads TSPL from filter via stdin
   - Manages retry/backoff for transient USB errors
   - Writes to `/dev/usb/lpX` with 512-byte chunking
+  - **IMPORTANTE**: Permissão deve ser 700 (somente root), senão CUPS pede autenticação
 
 - **PPD** (`/usr/share/ppd/custom/tspl-thermal.ppd`): Defines capabilities
   - PageSize: A4, Label4x6, Label3x5, Label2x4
   - Resolution: 203dpi, 300dpi
-  - cupsFilter: application/pdf → tspl-thermal
+  - cupsFilter: application/pdf → tspl-filter
 
 ## Development
 
