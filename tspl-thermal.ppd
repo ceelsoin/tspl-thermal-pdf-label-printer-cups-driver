@@ -25,8 +25,8 @@
 *cupsVersion: 1.7
 *cupsManualCopies: False
 *cupsModelNumber: 0
-*cupsFilter: "application/vnd.cups-pdf 0 /usr/lib/cups/filter/tspl-thermal"
-*cupsFilter: "application/pdf 0 /usr/lib/cups/filter/tspl-thermal"
+*cupsFilter: "application/vnd.cups-pdf 0 tspl-filter"
+*cupsFilter: "application/pdf 0 tspl-filter"
 
 *% Supported page sizes
 *OpenUI *PageSize: PickOne

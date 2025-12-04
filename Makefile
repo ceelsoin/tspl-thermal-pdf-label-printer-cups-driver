@@ -8,7 +8,8 @@ BACKEND_DIR = /usr/lib/cups/backend
 FILTER_DIR  = /usr/lib/cups/filter
 PPD_DIR     = /usr/share/ppd/custom
 
-LOCAL_PPD = tspldriver.ppd
+# PPD file name
+PPD_FILE = tspl-thermal.ppd
 
 BUILD_DIR = build
 
@@ -40,40 +41,36 @@ install: build
 	# PPD directory
 	mkdir -p $(PPD_DIR)
 
-	# Install local PPD directly
-	@if [ -f "$(LOCAL_PPD)" ]; then \
-		echo "Installing local PPD file $(LOCAL_PPD)..."; \
-		mkdir -p $(PPD_DIR); \
-		install -m 644 $(LOCAL_PPD) $(PPD_DIR)/$(LOCAL_PPD); \
-		ls -l "$(PPD_DIR)/"; \
+	# Install PPD file
+	@if [ -f "$(PPD_FILE)" ]; then \
+		echo "Installing PPD file $(PPD_FILE)..."; \
+		install -m 644 $(PPD_FILE) $(PPD_DIR)/$(PPD_FILE); \
+		ls -l "$(PPD_DIR)/$(PPD_FILE)"; \
 	else \
-		echo "Warning: local PPD '$(LOCAL_PPD)' not found in current directory $(PWD)!"; \
+		echo "ERROR: PPD file '$(PPD_FILE)' not found!"; \
+		exit 1; \
 	fi
 
-	# Install default PPD if it exists
-	@if [ -f ppd/$(DRIVER_NAME).ppd ]; then \
-		echo "Installing default PPD ppd/$(DRIVER_NAME).ppd ..."; \
-		install -m 644 ppd/$(DRIVER_NAME).ppd $(PPD_DIR)/; \
-		ls -l $(PPD_DIR)/$(DRIVER_NAME).ppd; \
-	fi
-
+	# Set correct ownership and permissions
+	# FILTER: 755 (readable/executable by all)
 	chown root:lp /usr/lib/cups/filter/tspl-filter
 	chmod 755 /usr/lib/cups/filter/tspl-filter
 
-	chown root:lp /usr/lib/cups/backend/tspl
-	chmod 755 /usr/lib/cups/backend/tspl
+	# BACKEND: 700 (CRITICAL! Must be root-only or CUPS asks for authentication)
+	chown root:root /usr/lib/cups/backend/tspl
+	chmod 700 /usr/lib/cups/backend/tspl
 
 
 	systemctl restart cups
 
 	@echo ""
 	@echo "=== Installation complete! ==="
-	@echo "Backend installed to: $(BACKEND_DIR)/$(BACKEND_NAME)"
-	@echo "Filter installed to:  $(FILTER_DIR)/$(FILTER_NAME)"
-	@echo "PPD installed to:     $(PPD_DIR)"
+	@echo "Backend installed to: $(BACKEND_DIR)/$(BACKEND_NAME) (mode 700)"
+	@echo "Filter installed to:  $(FILTER_DIR)/$(FILTER_NAME) (mode 755)"
+	@echo "PPD installed to:     $(PPD_DIR)/$(PPD_FILE)"
 	@echo ""
 	@echo "To add printer via lpadmin:"
-	@echo "  sudo lpadmin -p thermal-tspl -E -v tspl:/dev/usb/lp5 -P $(PPD_DIR)/$(LOCAL_PPD)"
+	@echo "  sudo lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp5 -P $(PPD_DIR)/$(PPD_FILE)"
 	@echo ""
 
 # ----------------------------------------------------------------------
@@ -84,7 +81,7 @@ uninstall:
 	@if [ "$$(id -u)" -ne 0 ]; then echo "Error: Must run as root (sudo)"; exit 1; fi
 	rm -f $(BACKEND_DIR)/$(BACKEND_NAME)
 	rm -f $(FILTER_DIR)/$(FILTER_NAME)
-	rm -f $(PPD_DIR)/$(LOCAL_PPD)
+	rm -f $(PPD_DIR)/$(PPD_FILE)
 	systemctl restart cups
 	@echo "Uninstallation complete!"
 
@@ -105,28 +102,28 @@ test:
 # ----------------------------------------------------------------------
 
 add-printer:
-	@echo "=== Adding TSPL test printer ==="
+	@echo "=== Adding TSPL printer ==="
 	@if [ "$$(id -u)" -ne 0 ]; then echo "Error: Must run as root"; exit 1; fi
 	@read -p "Enter printer device (default /dev/usb/lp5): " dev ; \
 	dev=$${dev:-/dev/usb/lp5}; \
-	lpadmin -p tspl-test -E -v tspl:$$dev -P $(PPD_DIR)/$(DRIVER_NAME).ppd
-	@echo "Printer 'tspl-test' added!"
+	lpadmin -p TSPLPrinter -E -v tspl:$$dev -P $(PPD_DIR)/$(PPD_FILE)
+	@echo "Printer 'TSPLPrinter' added!"
 
 remove-printer:
 	@if [ "$$(id -u)" -ne 0 ]; then echo "Error: Must run as root"; exit 1; fi
-	lpadmin -x tspl-test
+	lpadmin -x TSPLPrinter
 	@echo "Printer removed."
 
 recreate:
 	sudo make uninstall
 	sudo make install
-	sudo lpadmin -x tspl-test
-	sudo lpadmin -p tspl-test -E -v tspl:/dev/usb/lp5 -P /usr/share/ppd/custom/tspldriver.ppd
+	sudo lpadmin -x TSPLPrinter 2>/dev/null || true
+	sudo lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp5 -P $(PPD_DIR)/$(PPD_FILE)
 
 print-test:
 	@echo "=== Printing TSPL test label ==="
 	echo "SIZE 100 mm,150 mm\nCLS\nTEXT 100,100,\"3\",0,1,1,\"TSPL OK\"\nPRINT 1\n" \
-	| lp -d tspl-test -
+	| lp -d TSPLPrinter -
 
 status:
 	lpstat -p -d
@@ -137,8 +134,12 @@ logs:
 help:
 	@echo "Targets:"
 	@echo "  make build          - Build the driver"
-	@echo "  make install        - Install backend + filter + ppd"
-	@echo "  make uninstall      - Remove driver"
-	@echo "  make add-printer    - Add test printer"
+	@echo "  make install        - Install backend + filter + PPD (requires sudo)"
+	@echo "  make uninstall      - Remove driver (requires sudo)"
+	@echo "  make add-printer    - Add printer interactively (requires sudo)"
+	@echo "  make remove-printer - Remove printer (requires sudo)"
+	@echo "  make recreate       - Reinstall driver and recreate printer"
 	@echo "  make print-test     - Print test label"
+	@echo "  make status         - Show printer status"
 	@echo "  make logs           - Show CUPS logs"
+	@echo "  make clean          - Clean build files"

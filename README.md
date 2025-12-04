@@ -36,21 +36,41 @@ sudo ./install-cups-driver.sh
 # 1. Compile
 go build -o tspldriver main.go
 
-# 2. Copy binaries
-sudo cp tspldriver /usr/lib/cups/filter/tspl-thermal
-sudo cp tspldriver /usr/lib/cups/backend/tspl
-sudo chmod 755 /usr/lib/cups/filter/tspl-thermal
-sudo chmod 755 /usr/lib/cups/backend/tspl
+# 2. Install filter (755 permissions)
+sudo cp tspldriver /usr/lib/cups/filter/tspl-filter
+sudo chmod 755 /usr/lib/cups/filter/tspl-filter
 
-# 3. Copy PPD
+# 3. Install backend (700 permissions - CRITICAL!)
+# Backend MUST have 700 permissions or CUPS will ask for authentication
+sudo cp tspldriver /usr/lib/cups/backend/tspl
+sudo chmod 700 /usr/lib/cups/backend/tspl
+sudo chown root:root /usr/lib/cups/backend/tspl
+
+# 4. Copy PPD
 sudo mkdir -p /usr/share/ppd/custom
 sudo cp tspl-thermal.ppd /usr/share/ppd/custom/
 
-# 4. Restart CUPS
+# 5. Restart CUPS
 sudo systemctl restart cups
 
-# 5. Add printer
-sudo lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp4 -P /usr/share/ppd/custom/tspl-thermal.ppd
+# 6. Add printer
+sudo lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp5 -P /usr/share/ppd/custom/tspl-thermal.ppd
+```
+
+### Using Makefile
+
+```bash
+# Build and install
+sudo make install
+
+# Add printer
+sudo make add-printer
+
+# Print test
+make print-test
+
+# See all commands
+make help
 ```
 
 ## Usage Modes

@@ -500,88 +500,92 @@ func modeFilter(argv []string) error {
 }
 
 // ----------------- MODE: BACKEND (CUPS backend) --------------------------------
-// Backend is invoked by CUPS to send data to the device. When invoked with "list" should list devices.
-// When invoked as job, last argument typically is filename containing data (TSPL) or "-" to read stdin.
+// Backend is invoked by CUPS to send data to the device.
+// CUPS calls backend with: device-uri job-id user title copies options [file]
+// If file is not provided, data comes from stdin (piped from filter).
 func modeBackend(argv []string) error {
 	logInfo("Backend mode started with %d args", len(argv))
 	for i, arg := range argv {
 		logInfo("  backend argv[%d] = %s", i, arg)
 	}
 
-	// If called as "list" -> list available device URIs that this backend can handle.
-	// We'll look for /dev/usb/lp* or allow env override TSPL_DEVICES
-	if len(argv) > 1 && argv[len(argv)-1] == "list" {
-		// list available USB printers
+	// If called as "list" -> list available device URIs
+	if len(argv) == 1 || (len(argv) > 1 && argv[len(argv)-1] == "list") {
 		matches, _ := filepath.Glob("/dev/usb/lp*")
 		if len(matches) == 0 {
-			fmt.Println("direct tspl:/dev/usb/lp5 \"TSPL USB Printer\"")
+			fmt.Println("direct tspl:/dev/usb/lp5 \"TSPL USB Printer\" \"TSPL Thermal Label Printer\"")
 			return nil
 		}
 		for _, m := range matches {
-			fmt.Printf("direct tspl:%s \"TSPL USB Printer\"\n", m)
+			fmt.Printf("direct tspl:%s \"TSPL USB Printer\" \"TSPL Thermal Label Printer\"\n", m)
 		}
 		return nil
 	}
 
-	// job invocation - CUPS may call backend with args:
-	// argv[0]=backend, argv[1]=job-id, argv[2]=user, argv[3]=title, argv[4]=copies, argv[5]=options, argv[6]=filename
-	// But sometimes it is: backend uri jobid user title copies options filename
-	// We'll parse from end: last arg is filename or "-" and device may be passed via job URI (argv[1] or argv[0]).
-	if len(argv) < 2 {
-		return fmt.Errorf("backend: insufficient args")
+	// CUPS backend invocation:
+	// argv[0] = device-uri (e.g., tspl:/dev/usb/lp5)
+	// argv[1] = job-id
+	// argv[2] = user
+	// argv[3] = title
+	// argv[4] = copies
+	// argv[5] = options
+	// argv[6] = file (optional - if missing, read from stdin)
+	if len(argv) < 6 {
+		return fmt.Errorf("backend: insufficient args (need at least 6, got %d)", len(argv))
 	}
 
-	// try to find filename at the end
-	filename := ""
-	if len(argv) > 1 {
-		filename = argv[len(argv)-1]
-	}
-	// try to detect device from env or argv
-	// If argv[0] contains ":" we might have scheme. We'll accept TSPL_DEVICE env override.
+	// Extract device from URI (argv[0])
 	dev := os.Getenv("TSPL_DEVICE")
 	if dev == "" {
-		if len(argv) > 0 && strings.Contains(argv[0], ":") {
-			parts := strings.SplitN(argv[0], ":", 2)
-			dev = parts[1]
+		deviceURI := argv[0]
+		if strings.HasPrefix(deviceURI, "tspl:") {
+			dev = strings.TrimPrefix(deviceURI, "tspl:")
+			dev = strings.TrimPrefix(dev, "//")
+		} else if strings.HasPrefix(deviceURI, "file:") {
+			dev = strings.TrimPrefix(deviceURI, "file:")
+			dev = strings.TrimPrefix(dev, "//")
+		} else {
+			dev = deviceURI
 		}
 	}
 	if dev == "" {
 		dev = "/dev/usb/lp5"
 	}
 
+	// Determine if we have a file argument or should read from stdin
+	// If argv[6] exists and is not "-", it's a file path
 	var tspl []byte
 	var err error
-	if filename == "-" || filename == "" {
-		logInfo("Backend: reading TSPL from stdin...")
-		tspl, err = ioutil.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		logInfo("Backend: read %d bytes from stdin", len(tspl))
-	} else {
+
+	if len(argv) >= 7 && argv[6] != "" && argv[6] != "-" {
+		filename := argv[6]
 		logInfo("Backend: reading from file %s", filename)
 		tspl, err = ioutil.ReadFile(filename)
 		if err != nil {
 			return fmt.Errorf("backend: failed to read file %s: %w", filename, err)
 		}
 		logInfo("Backend: read %d bytes from file", len(tspl))
+	} else {
+		// Read from stdin (data piped from filter)
+		logInfo("Backend: reading TSPL from stdin...")
+		tspl, err = ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		logInfo("Backend: read %d bytes from stdin", len(tspl))
 	}
 
 	if len(tspl) == 0 {
-		return fmt.Errorf("no data to write")
+		return fmt.Errorf("no data to write (got 0 bytes)")
 	}
 
-	// Extract device path from URI if needed
-	if strings.HasPrefix(dev, "tspl:") || strings.HasPrefix(dev, "file:") {
-		parts := strings.SplitN(dev, ":", 2)
-		dev = strings.TrimPrefix(parts[1], "//")
-	}
-	logInfo("Backend writing to device %s (bytes=%d)", dev, len(tspl))
+	logInfo("Backend: writing to device %s (bytes=%d)", dev, len(tspl))
 
 	if err := writeToPrinter(tspl, dev); err != nil {
 		return fmt.Errorf("writeToPrinter: %w", err)
 	}
 
+	logInfo("Backend: successfully wrote %d bytes to %s", len(tspl), dev)
 	return nil
 }
 
@@ -646,23 +650,46 @@ func modeCLI(pdfPath string, printer string, options string) error {
 }
 
 func detectMode() string {
-	name := filepath.Base(os.Args[0])
-	name = strings.ToLower(name)
+	// argv[0] pode ser o path completo ou apenas o nome
+	// Para backend CUPS, pode ser "tspl:/dev/usb/lp5" (URI)
+	arg0 := os.Args[0]
 
-	// Detectar backend pelo nome (incluindo "tspl" que é o nome do backend CUPS)
-	if strings.Contains(name, "backend") || name == "tspl" {
+	// Se argv[0] contém ":" é provavelmente um URI de backend (tspl:/dev/...)
+	if strings.Contains(arg0, ":") && strings.HasPrefix(arg0, "tspl:") {
 		return "backend"
 	}
 
-	// Detectar filter pelo nome OU pelo número de argumentos do CUPS
-	// CUPS filter recebe: argv[0]=filter argv[1]=job-id argv[2]=user argv[3]=title argv[4]=copies argv[5]=options [argv[6]=filename]
-	if strings.Contains(name, "filter") || strings.Contains(name, "tspl-thermal") {
+	// Extrair apenas o nome do executável (sem path)
+	name := filepath.Base(arg0)
+	name = strings.ToLower(name)
+
+	// Detectar modo pelo nome do executável
+	// Nomes suportados:
+	//   - tspl-backend, tspl (backend CUPS)
+	//   - tspl-filter, tspl-thermal (filtro CUPS)
+	//   - tspldriver ou outros (CLI)
+
+	// Backend: tspl-backend ou tspl (nome curto para backend CUPS)
+	if name == "tspl-backend" || name == "tspl" {
+		return "backend"
+	}
+
+	// Filter: tspl-filter ou tspl-thermal
+	if name == "tspl-filter" || name == "tspl-thermal" {
 		return "filter"
 	}
 
-	// Se temos 5 ou 6 argumentos numéricos típicos de filtro CUPS
-	if len(os.Args) >= 6 {
-		// Verificar se argv[1] parece ser um job-id (número)
+	// Fallback: detectar por substring (compatibilidade)
+	if strings.Contains(name, "backend") {
+		return "backend"
+	}
+	if strings.Contains(name, "filter") || strings.Contains(name, "thermal") {
+		return "filter"
+	}
+
+	// Se temos 6+ argumentos e argv[1] é numérico, provavelmente é filtro CUPS
+	// MAS só se argv[0] não for um URI (já tratado acima)
+	if len(os.Args) >= 6 && !strings.Contains(arg0, ":") {
 		if _, err := strconv.Atoi(os.Args[1]); err == nil {
 			return "filter"
 		}
@@ -724,18 +751,26 @@ func main() {
 
 	recalcPixels()
 
+	// CUPS backend exit codes:
+	// 0 = CUPS_BACKEND_OK
+	// 1 = CUPS_BACKEND_FAILED (retry later)
+	// 2 = CUPS_BACKEND_AUTH_REQUIRED (asks for auth - DO NOT USE!)
+	// 3 = CUPS_BACKEND_HOLD (holds job)
+	// 4 = CUPS_BACKEND_STOP (stops queue)
+	// 5 = CUPS_BACKEND_CANCEL (cancels job)
+
 	// route modes
 	switch finalMode {
 	case "filter":
 		// CUPS filter mode: receives job-id user title copies options [filename]
 		if err := modeFilter(os.Args); err != nil {
 			logErr("filter error: %v", err)
-			os.Exit(2)
+			os.Exit(1) // CUPS_BACKEND_FAILED - will retry
 		}
 	case "backend":
 		if err := modeBackend(os.Args); err != nil {
 			logErr("backend error: %v", err)
-			os.Exit(3)
+			os.Exit(1) // CUPS_BACKEND_FAILED - will retry
 		}
 	default: // cli
 		if len(args) < 1 {
@@ -753,7 +788,7 @@ func main() {
 		}
 		if err := modeCLI(pdfPath, printer, options); err != nil {
 			logErr("cli error: %v", err)
-			os.Exit(4)
+			os.Exit(1)
 		}
 	}
 }

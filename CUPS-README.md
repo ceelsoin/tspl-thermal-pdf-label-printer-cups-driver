@@ -1,261 +1,262 @@
-# Driver CUPS para Impressoras Térmicas TSPL
+# CUPS Driver for TSPL Thermal Printers
 
-Driver CUPS para impressoras térmicas que usam linguagem TSPL (como TSC, Zebra, etc.).
+CUPS driver for thermal printers that use TSPL language (such as TSC, Zebra, etc.).
 
-## Características
+## Features
 
-- ✅ Conversão automática de PDF A4 para etiquetas 10x15cm (4 por página)
-- ✅ Modo de impressão inteligente: fatiamento em grid 2x2 (A4) ou página inteira (tamanhos de label)
-- ✅ Detecção inteligente de páginas vazias (ignora se < 10% de conteúdo)
-- ✅ Suporte a impressão via CUPS
-- ✅ Preview no navegador via interface web do CUPS
-- ✅ Suporte a múltiplos tamanhos de etiqueta (A4, 4x6, 3x5, 2x4)
-- ✅ Ajuste automático de margens
+- ✅ Automatic conversion from A4 PDF to 10x15cm labels (4 per page)
+- ✅ Smart printing mode: 2x2 grid slicing (A4) or full page (label sizes)
+- ✅ Smart blank page detection (ignores if < 10% content)
+- ✅ CUPS printing support
+- ✅ Browser preview via CUPS web interface
+- ✅ Multiple label size support (A4, 4x6, 3x5, 2x4)
+- ✅ Automatic margin adjustment
 
-## Instalação
+## Installation
 
-### 1. Compilar e instalar
+### 1. Compile and install
 
 ```bash
 sudo ./install-cups-driver.sh
 ```
 
-### 2. Adicionar impressora
+### 2. Add printer
 
-**Via interface web** (recomendado):
+**Via web interface** (recommended):
 ```bash
-# Abrir navegador em:
+# Open browser at:
 http://localhost:631
 
-# Seguir:
+# Follow:
 # 1. Administration > Add Printer
-# 2. Selecionar dispositivo USB (ex: /dev/usb/lp5)
-# 3. Escolher driver: "TSPL Thermal Label Printer"
-# 4. Definir como padrão (opcional)
+# 2. Select USB device (e.g., /dev/usb/lp5)
+# 3. Choose driver: "TSPL Thermal Label Printer"
+# 4. Set as default (optional)
 ```
 
-**Via linha de comando**:
+**Via command line**:
 ```bash
-# Adicionar impressora
+# Add printer
 sudo lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp5 -P /usr/share/ppd/custom/tspl-thermal.ppd
 
-# Definir como padrão (opcional)
+# Set as default (optional)
 sudo lpadmin -d TSPLPrinter
 ```
 
-## Uso
+## Usage
 
-### Modos de Impressão
+### Printing Modes
 
-O driver suporta dois modos de operação baseados no tamanho de página selecionado:
+The driver supports two operating modes based on the selected page size:
 
-#### 1. **SLICE MODE** (Modo de Fatiamento) - Página A4
-Quando você seleciona **PageSize=A4**:
-- ✂️ O driver fatia a página A4 em um grid 2x2 (4 etiquetas de 10x15cm)
-- 🔍 Detecta automaticamente etiquetas vazias (< 10% de conteúdo) e as ignora
-- 📏 Aplica margens de segurança para evitar cortes
-- 📄 Ideal para: PDFs A4 com layout de múltiplas etiquetas
+#### 1. **SLICE MODE** - A4 Page
+When you select **PageSize=A4**:
+- ✂️ The driver slices the A4 page into a 2x2 grid (4 labels of 10x15cm)
+- 🔍 Automatically detects blank labels (< 10% content) and ignores them
+- 📏 Applies safety margins to avoid cuts
+- 📄 Ideal for: A4 PDFs with multiple label layouts
 
-**Exemplo de uso:**
+**Usage example:**
 ```bash
-lp -d TSPLPrinter -o PageSize=A4 etiquetas-multiplas.pdf
+lp -d TSPLPrinter -o PageSize=A4 multiple-labels.pdf
 ```
 
-#### 2. **FULL PAGE MODE** (Modo Página Inteira) - Tamanhos de Label
-Quando você seleciona **Label4x6**, **Label3x5** ou **Label2x4**:
-- 📄 O driver imprime a página inteira como aparece no preview
-- 🎯 Não há fatiamento - respeita exatamente o que você vê no navegador
-- 📐 Redimensiona proporcionalmente para o tamanho de etiqueta selecionado
-- 🖼️ Ideal para: PDFs já formatados para uma etiqueta específica
+#### 2. **FULL PAGE MODE** - Label Sizes
+When you select **Label4x6**, **Label3x5**, or **Label2x4**:
+- 📄 The driver prints the entire page as it appears in the preview
+- 🎯 No slicing - respects exactly what you see in the browser
+- 📐 Proportionally resizes to the selected label size
+- 🖼️ Ideal for: PDFs already formatted for a specific label
 
-**Exemplo de uso:**
+**Usage example:**
 ```bash
-lp -d TSPLPrinter -o PageSize=Label4x6 etiqueta-unica.pdf
+lp -d TSPLPrinter -o PageSize=Label4x6 single-label.pdf
 ```
 
-### Imprimir via CUPS
+### Print via CUPS
 
 ```bash
-# Modo SLICE (A4 → 4 etiquetas)
-lp -d TSPLPrinter -o PageSize=A4 arquivo-a4.pdf
+# SLICE mode (A4 → 4 labels)
+lp -d TSPLPrinter -o PageSize=A4 a4-file.pdf
 
-# Modo FULL PAGE (página inteira em etiqueta 10x15cm)
-lp -d TSPLPrinter -o PageSize=Label4x6 etiqueta.pdf
+# FULL PAGE mode (full page on 10x15cm label)
+lp -d TSPLPrinter -o PageSize=Label4x6 label.pdf
 
-# Com resolução customizada
-lp -d TSPLPrinter -o PageSize=Label4x6 -o Resolution=300dpi etiqueta.pdf
+# With custom resolution
+lp -d TSPLPrinter -o PageSize=Label4x6 -o Resolution=300dpi label.pdf
 ```
 
-### Imprimir via CLI (modo direto)
+### Print via CLI (direct mode)
 
 ```bash
-# Modo CLI (sem CUPS)
-./tspldriver --dpi=203 --width=100 --height=150 --margin=2 --gap=2 arquivo.pdf /dev/usb/lp5
+# CLI mode (without CUPS)
+./tspldriver --dpi=203 --width=100 --height=150 --margin=2 --gap=2 file.pdf /dev/usb/lp5
 ```
 
-### Preview no navegador
+### Browser preview
 
-1. Acesse http://localhost:631/printers/TSPLPrinter
-2. Clique em "Maintenance" > "Print Test Page"
-3. Ou use qualquer aplicativo que suporte impressão no Chrome/Firefox
+1. Access http://localhost:631/printers/TSPLPrinter
+2. Click "Maintenance" > "Print Test Page"
+3. Or use any application that supports printing in Chrome/Firefox
 
-## Configurações
+## Configuration
 
-### Tamanhos de etiqueta suportados
+### Supported label sizes
 
-- **A4** (210x297mm) - Modo SLICE: fatia em 4 etiquetas 10x15cm
-- **4x6** (100x150mm) - Modo FULL PAGE: imprime página inteira
-- **3x5** (76x127mm) - Modo FULL PAGE: imprime página inteira
-- **2x4** (50x100mm) - Modo FULL PAGE: imprime página inteira
+- **A4** (210x297mm) - SLICE mode: slices into 4 labels of 10x15cm
+- **4x6** (100x150mm) - FULL PAGE mode: prints entire page
+- **3x5** (76x127mm) - FULL PAGE mode: prints entire page
+- **2x4** (50x100mm) - FULL PAGE mode: prints entire page
 
-### Resoluções
+### Resolutions
 
-- 203 DPI (padrão)
+- 203 DPI (default)
 - 300 DPI
 
-### Opções de impressão
+### Print options
 
 ```bash
-# DPI personalizado
-lp -d TSPLPrinter -o Resolution=300dpi arquivo.pdf
+# Custom DPI
+lp -d TSPLPrinter -o Resolution=300dpi file.pdf
 
-# Tamanho personalizado
-lp -d TSPLPrinter -o PageSize=Label3x5 arquivo.pdf
+# Custom size
+lp -d TSPLPrinter -o PageSize=Label3x5 file.pdf
 ```
 
 ## Troubleshooting
 
-### Impressora não aparece
+### Printer not showing up
 
 ```bash
-# Verificar se CUPS está rodando
+# Check if CUPS is running
 systemctl status cups
 
-# Reiniciar CUPS
+# Restart CUPS
 sudo systemctl restart cups
 
-# Verificar dispositivo USB
+# Check USB device
 ls -la /dev/usb/lp*
 ```
 
-### Permissões
+### Permissions
 
 ```bash
-# Adicionar usuário ao grupo lp
+# Add user to lp group
 sudo usermod -aG lp $USER
 
-# Recarregar grupos (ou fazer logout/login)
+# Reload groups (or logout/login)
 newgrp lp
 ```
 
-### Verificar logs
+### Check logs
 
 ```bash
-# Logs do CUPS
+# CUPS logs
 tail -f /var/log/cups/error_log
 
-# Logs do filtro
+# Filter logs
 sudo journalctl -u cups -f
 ```
 
-### Remover instalação
+### Remove installation
 
 ```bash
-# Remover impressora
+# Remove printer
 sudo lpadmin -x TSPLPrinter
 
-# Remover arquivos
+# Remove files
 sudo rm -f /usr/lib/cups/filter/tspl-thermal
 sudo rm -f /usr/lib/cups/backend/tspl
 sudo rm -f /usr/share/ppd/custom/tspl-thermal.ppd
 
-# Reiniciar CUPS
+# Restart CUPS
 sudo systemctl restart cups
 ```
 
-## Arquitetura
+## Architecture
 
-### Pipeline CUPS
+### CUPS Pipeline
 
 ```
-PDF → CUPS → Filtro TSPL → Backend TSPL → Impressora
+PDF → CUPS → TSPL Filter → TSPL Backend → Printer
 ```
 
-### Fluxo de Processamento
+### Processing Flow
 
-#### Modo SLICE (PageSize=A4)
+#### SLICE Mode (PageSize=A4)
 ```
-PDF A4 (210x297mm)
+A4 PDF (210x297mm)
    ↓
-Renderização para PNG @ 203 DPI
+Render to PNG @ 203 DPI
    ↓
-Fatiamento em grid 2x2
+Slice into 2x2 grid
    ↓
-4 etiquetas 10x15cm (100x150mm)
+4 labels 10x15cm (100x150mm)
    ↓
-Detecção de páginas vazias (<10% conteúdo)
+Blank page detection (<10% content)
    ↓
-Conversão para TSPL bitmap
+Convert to TSPL bitmap
    ↓
-Envio para /dev/usb/lpX
-```
-
-#### Modo FULL PAGE (PageSize=Label4x6/3x5/2x4)
-```
-PDF (qualquer tamanho)
-   ↓
-Renderização para PNG @ 203 DPI
-   ↓
-Redimensionamento proporcional
-   ↓
-Conversão para TSPL bitmap
-   ↓
-Envio para /dev/usb/lpX
+Send to /dev/usb/lpX
 ```
 
-### Componentes
+#### FULL PAGE Mode (PageSize=Label4x6/3x5/2x4)
+```
+PDF (any size)
+   ↓
+Render to PNG @ 203 DPI
+   ↓
+Proportional resize
+   ↓
+Convert to TSPL bitmap
+   ↓
+Send to /dev/usb/lpX
+```
 
-- **Filtro** (`/usr/lib/cups/filter/tspl-thermal`): Converte PDF → TSPL
-  - Detecta PageSize das opções CUPS
-  - Ativa SLICE_MODE para A4, FULL PAGE para labels
-  - Gera comandos TSPL (SIZE, GAP, BITMAP, PRINT)
+### Components
 
-- **Backend** (`/usr/lib/cups/backend/tspl`): Envia TSPL → dispositivo
-  - Lê TSPL do filtro via stdin
-  - Gerencia retry/backoff para erros USB transientes
-  - Escreve para `/dev/usb/lpX` com chunking de 512 bytes
+- **Filter** (`/usr/lib/cups/filter/tspl-thermal`): Converts PDF → TSPL
+  - Detects PageSize from CUPS options
+  - Activates SLICE_MODE for A4, FULL PAGE for labels
+  - Generates TSPL commands (SIZE, GAP, BITMAP, PRINT)
 
-- **PPD** (`/usr/share/ppd/custom/tspl-thermal.ppd`): Define capacidades
+- **Backend** (`/usr/lib/cups/backend/tspl`): Sends TSPL → device
+  - Reads TSPL from filter via stdin
+  - Manages retry/backoff for transient USB errors
+  - Writes to `/dev/usb/lpX` with 512-byte chunking
+
+- **PPD** (`/usr/share/ppd/custom/tspl-thermal.ppd`): Defines capabilities
   - PageSize: A4, Label4x6, Label3x5, Label2x4
   - Resolution: 203dpi, 300dpi
   - cupsFilter: application/pdf → tspl-thermal
 
-## Desenvolvimento
+## Development
 
-### Modos de operação
+### Operating modes
 
-O driver suporta 3 modos:
+The driver supports 3 modes:
 
-1. **CLI**: Uso direto via linha de comando
-2. **Filter**: Modo filtro CUPS (recebe PDF, converte para TSPL)
-3. **Backend**: Modo backend CUPS (envia TSPL para impressora)
+1. **CLI**: Direct usage via command line
+2. **Filter**: CUPS filter mode (receives PDF, converts to TSPL)
+3. **Backend**: CUPS backend mode (sends TSPL to printer)
 
-### Testar sem instalar
+### Test without installing
 
 ```bash
-# Compilar
+# Compile
 go build -o tspldriver main.go
 
-# Modo filter com SLICE (A4 → 4 etiquetas)
-./tspldriver --mode=filter 1 user title 1 "PageSize=A4" arquivo-a4.pdf > output.tspl
+# Filter mode with SLICE (A4 → 4 labels)
+./tspldriver --mode=filter 1 user title 1 "PageSize=A4" a4-file.pdf > output.tspl
 
-# Modo filter com FULL PAGE (página inteira)
-./tspldriver --mode=filter 1 user title 1 "PageSize=Label4x6" etiqueta.pdf > output.tspl
+# Filter mode with FULL PAGE (entire page)
+./tspldriver --mode=filter 1 user title 1 "PageSize=Label4x6" label.pdf > output.tspl
 
-# Modo backend
+# Backend mode
 cat output.tspl | ./tspldriver --mode=backend tspl:/dev/usb/lp5
 ```
 
-## Licença
+## License
 
-MIT License - veja LICENSE para detalhes
+MIT License - see LICENSE for details
+

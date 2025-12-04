@@ -25,15 +25,22 @@ mkdir -p "$BACKEND_DIR"
 echo "Compilando driver..."
 go build -o tspldriver main.go
 
-# Instala como filtro CUPS
-echo "Instalando filtro CUPS..."
-cp tspldriver "${FILTER_DIR}/${DRIVER_NAME}"
-chmod 755 "${FILTER_DIR}/${DRIVER_NAME}"
+# Instala como filtro CUPS (nome: tspl-filter ou tspl-thermal)
+# O modo é detectado pelo nome do executável
+echo "Instalando filtro CUPS como tspl-filter..."
+cp tspldriver "${FILTER_DIR}/tspl-filter"
+chmod 755 "${FILTER_DIR}/tspl-filter"
 
-# Instala como backend CUPS
-echo "Instalando backend CUPS..."
+# Link simbólico para compatibilidade com PPD existente
+ln -sf tspl-filter "${FILTER_DIR}/${DRIVER_NAME}"
+
+# Instala como backend CUPS (nome: tspl)
+# IMPORTANTE: Backends CUPS DEVEM ter permissão 700 (apenas root)
+# Se tiver 755, o CUPS considera "inseguro" e pede autenticação!
+echo "Instalando backend CUPS como tspl..."
 cp tspldriver "${BACKEND_DIR}/tspl"
-chmod 755 "${BACKEND_DIR}/tspl"
+chmod 700 "${BACKEND_DIR}/tspl"
+chown root:root "${BACKEND_DIR}/tspl"
 
 # Copia o PPD
 echo "Copiando arquivo PPD..."
@@ -46,6 +53,10 @@ systemctl restart cups
 
 echo ""
 echo "=== Instalação concluída! ==="
+echo ""
+echo "Binários instalados:"
+echo "  - Filtro:  ${FILTER_DIR}/tspl-filter (755)"
+echo "  - Backend: ${BACKEND_DIR}/tspl (700)"
 echo ""
 echo "Para adicionar a impressora:"
 echo "1. Via Web: http://localhost:631"
