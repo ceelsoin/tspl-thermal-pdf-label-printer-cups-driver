@@ -21,16 +21,23 @@ mkdir -p "$FILTER_DIR"
 mkdir -p "$PPD_DIR"
 mkdir -p "$BACKEND_DIR"
 
-# Compila o filtro Go
-echo "Compilando filtro CUPS..."
-go build -o "${FILTER_DIR}/${DRIVER_NAME}" ./cmd/cups-filter/
+# Compila o binário Go
+echo "Compilando driver..."
+go build -o tspldriver main.go
+
+# Instala como filtro CUPS
+echo "Instalando filtro CUPS..."
+cp tspldriver "${FILTER_DIR}/${DRIVER_NAME}"
+chmod 755 "${FILTER_DIR}/${DRIVER_NAME}"
+
+# Instala como backend CUPS
+echo "Instalando backend CUPS..."
+cp tspldriver "${BACKEND_DIR}/tspl"
+chmod 755 "${BACKEND_DIR}/tspl"
 
 # Copia o PPD
 echo "Copiando arquivo PPD..."
-cp "./ppd/${DRIVER_NAME}.ppd" "${PPD_DIR}/"
-
-# Define permissões corretas
-chmod 755 "${FILTER_DIR}/${DRIVER_NAME}"
+cp "${DRIVER_NAME}.ppd" "${PPD_DIR}/"
 chmod 644 "${PPD_DIR}/${DRIVER_NAME}.ppd"
 
 # Reinicia CUPS
@@ -41,11 +48,17 @@ echo ""
 echo "=== Instalação concluída! ==="
 echo ""
 echo "Para adicionar a impressora:"
-echo "1. Acesse http://localhost:631"
-echo "2. Administration > Add Printer"
-echo "3. Selecione seu dispositivo USB (ex: /dev/usb/lp0)"
-echo "4. Escolha o driver: TSPL Thermal Label Printer"
+echo "1. Via Web: http://localhost:631"
+echo "   - Administration > Add Printer"
+echo "   - Selecione: TSPL Thermal Label Printer"
 echo ""
-echo "Ou via linha de comando:"
-echo "  lpadmin -p thermal-printer -E -v file:/dev/usb/lp5 -P ${PPD_DIR}/${DRIVER_NAME}.ppd"
+echo "2. Via linha de comando:"
+echo "   lpadmin -p TSPLPrinter -E -v tspl:/dev/usb/lp5 -P ${PPD_DIR}/${DRIVER_NAME}.ppd"
+echo ""
+echo "Para testar impressão:"
+echo "   lp -d TSPLPrinter seu-arquivo.pdf"
+echo ""
+echo "Para visualizar preview no navegador:"
+echo "   Acesse: http://localhost:631/printers/TSPLPrinter"
+echo ""
 echo ""

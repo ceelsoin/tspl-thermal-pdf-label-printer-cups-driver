@@ -1,0 +1,85 @@
+*PPD-Adobe: "4.3"
+*%
+*% PPD for TSPL Thermal Label Printer
+*% For use with CUPS and thermal label printers using TSPL language
+*%
+
+*FormatVersion: "4.3"
+*FileVersion: "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "TSPL.PPD"
+*Manufacturer: "Generic"
+*Product: "(TSPL Thermal Printer)"
+*ModelName: "TSPL Thermal Label Printer"
+*ShortNickName: "TSPL Thermal"
+*NickName: "TSPL Thermal Label Printer"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*cupsVersion: 1.7
+*cupsManualCopies: False
+*cupsModelNumber: 0
+*cupsFilter: "application/vnd.cups-pdf 0 /usr/lib/cups/filter/tspl-thermal"
+*cupsFilter: "application/pdf 0 /usr/lib/cups/filter/tspl-thermal"
+
+*% Supported page sizes
+*OpenUI *PageSize: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: Label4x6
+*PageSize A4/A4 (4 labels per sheet): "<</PageSize[595.28 841.89]/ImagingBBox null>>setpagedevice"
+*PageSize Label4x6/4x6 Label (100x150mm): "<</PageSize[283.46 425.20]/ImagingBBox null>>setpagedevice"
+*PageSize Label3x5/3x5 Label (76x127mm): "<</PageSize[215.43 360.00]/ImagingBBox null>>setpagedevice"
+*PageSize Label2x4/2x4 Label (50x100mm): "<</PageSize[141.73 283.46]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: Label4x6
+*PageRegion A4/A4 (4 labels per sheet): "<</PageSize[595.28 841.89]/ImagingBBox null>>setpagedevice"
+*PageRegion Label4x6/4x6 Label (100x150mm): "<</PageSize[283.46 425.20]/ImagingBBox null>>setpagedevice"
+*PageRegion Label3x5/3x5 Label (76x127mm): "<</PageSize[215.43 360.00]/ImagingBBox null>>setpagedevice"
+*PageRegion Label2x4/2x4 Label (50x100mm): "<</PageSize[141.73 283.46]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: Label4x6
+*ImageableArea A4/A4: "0.00 0.00 595.28 841.89"
+*ImageableArea Label4x6/4x6 Label: "0.00 0.00 283.46 425.20"
+*ImageableArea Label3x5/3x5 Label: "0.00 0.00 215.43 360.00"
+*ImageableArea Label2x4/2x4 Label: "0.00 0.00 141.73 283.46"
+
+*DefaultPaperDimension: Label4x6
+*PaperDimension A4/A4: "595.28 841.89"
+*PaperDimension Label4x6/4x6 Label: "283.46 425.20"
+*PaperDimension Label3x5/3x5 Label: "215.43 360.00"
+*PaperDimension Label2x4/2x4 Label: "141.73 283.46"
+
+*% Resolution
+*OpenUI *Resolution/Print Quality: PickOne
+*OrderDependency: 20 AnySetup *Resolution
+*DefaultResolution: 203dpi
+*Resolution 203dpi/203 DPI: "<</HWResolution[203 203]>>setpagedevice"
+*Resolution 300dpi/300 DPI: "<</HWResolution[300 300]>>setpagedevice"
+*CloseUI: *Resolution
+
+*% Print speed/darkness
+*OpenUI *cupsPrintQuality/Print Darkness: PickOne
+*OrderDependency: 25 AnySetup *cupsPrintQuality
+*DefaultcupsPrintQuality: Normal
+*cupsPrintQuality Draft/Light: ""
+*cupsPrintQuality Normal/Normal: ""
+*cupsPrintQuality High/Dark: ""
+*CloseUI: *cupsPrintQuality
+
+*DefaultFont: Courier
+*Font Courier: Standard "(001.000)" Standard ROM
+*Font Courier-Bold: Standard "(001.000)" Standard ROM
+*Font Courier-Oblique: Standard "(001.000)" Standard ROM
+*Font Courier-BoldOblique: Standard "(001.000)" Standard ROM
+
+*% End of PPD file
