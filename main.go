@@ -56,6 +56,71 @@ func logErr(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, "E: "+format+"\n", a...)
 }
 
+// ----------------- PDF size detection ----------------------------------------
+// A4 dimensions: 210x297mm = 595x842 points (at 72 DPI)
+// Tolerance: ±10 points (~3.5mm) to account for slight variations
+const (
+	A4_WIDTH_PT       = 595.0
+	A4_HEIGHT_PT      = 842.0
+	SIZE_TOLERANCE_PT = 10.0
+)
+
+// isPageA4Size checks if the rendered image dimensions correspond to A4 size
+// Returns true if the page is A4 (within tolerance)
+func isPageA4Size(imgWidth, imgHeight int, renderDPI int) bool {
+	// Convert image pixels back to points (72 DPI reference)
+	widthPt := float64(imgWidth) * 72.0 / float64(renderDPI)
+	heightPt := float64(imgHeight) * 72.0 / float64(renderDPI)
+
+	// Check if dimensions match A4 (portrait or landscape)
+	isA4Portrait := math.Abs(widthPt-A4_WIDTH_PT) < SIZE_TOLERANCE_PT &&
+		math.Abs(heightPt-A4_HEIGHT_PT) < SIZE_TOLERANCE_PT
+	isA4Landscape := math.Abs(widthPt-A4_HEIGHT_PT) < SIZE_TOLERANCE_PT &&
+		math.Abs(heightPt-A4_WIDTH_PT) < SIZE_TOLERANCE_PT
+
+	return isA4Portrait || isA4Landscape
+}
+
+// detectPrintMode determines print mode based on PDF page size
+// Returns "slice" for A4 pages, "fullpage" for other sizes
+func detectPrintMode(pdfPath string) string {
+	doc, err := fitz.New(pdfPath)
+	if err != nil {
+		logErr("Cannot open PDF to detect size, defaulting to fullpage: %v", err)
+		return "fullpage"
+	}
+	defer doc.Close()
+
+	if doc.NumPage() == 0 {
+		return "fullpage"
+	}
+
+	// Render first page at low DPI just to check dimensions
+	img, err := doc.ImageDPI(0, 72.0) // 72 DPI = 1 pixel per point
+	if err != nil {
+		logErr("Cannot render page to detect size, defaulting to fullpage: %v", err)
+		return "fullpage"
+	}
+
+	bounds := img.Bounds()
+	widthPt := float64(bounds.Dx())
+	heightPt := float64(bounds.Dy())
+
+	// Check A4 (portrait or landscape)
+	isA4Portrait := math.Abs(widthPt-A4_WIDTH_PT) < SIZE_TOLERANCE_PT &&
+		math.Abs(heightPt-A4_HEIGHT_PT) < SIZE_TOLERANCE_PT
+	isA4Landscape := math.Abs(widthPt-A4_HEIGHT_PT) < SIZE_TOLERANCE_PT &&
+		math.Abs(heightPt-A4_WIDTH_PT) < SIZE_TOLERANCE_PT
+
+	if isA4Portrait || isA4Landscape {
+		logInfo("PDF page size: %.0fx%.0f pt -> A4 detected -> SLICE MODE", widthPt, heightPt)
+		return "slice"
+	}
+
+	logInfo("PDF page size: %.0fx%.0f pt -> Not A4 -> FULL PAGE MODE", widthPt, heightPt)
+	return "fullpage"
+}
+
 // ----------------- PDF -> PNG (pages) ---------------------------------------
 func pdfToPngPages(pdfPath string, tmpDir string) ([]string, error) {
 	logInfo("Converting PDF to PNG at %ddpi ...", DPI)
@@ -111,7 +176,6 @@ func isImageBlank(img image.Image, threshold uint8) bool {
 		}
 	}
 
-	// Se mais de 95% da imagem é branca, considera em branco
 	return float64(whitePixels)/float64(totalPixels) > 0.95
 }
 
@@ -130,11 +194,9 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 	logInfo("Label size: %dx%d pixels", PX_W, PX_H)
 	logInfo("Margin: %dmm = %dpx", int(MARGIN_MM), MARGIN_PX)
 
-	// Grid 2x2 (até 4 labels por página)
 	rows := 2
 	cols := 2
 
-	// Calcular quantas labels cabem realmente (limitado a 2 linhas, 2 colunas)
 	maxRows := int(math.Ceil(float64(pageH) / float64(PX_H)))
 	if maxRows < rows {
 		rows = maxRows
@@ -155,21 +217,18 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 			left := c * PX_W
 			top := r * PX_H
 
-			// Aplicar margem segura para coluna direita (c=1)
 			if c == 1 {
 				left += SAFE_MARGIN_RIGHT_PX + 25
 			} else if c == 0 {
 				left += SAFE_MARGIN_RIGHT_PX - 25
 			}
 
-			// Validar se está dentro dos limites
 			if left >= pageW || top >= pageH {
 				logInfo("Label position %d skipped: out of bounds (left=%d top=%d, page=%dx%d)", labelIndex, left, top, pageW, pageH)
 				labelIndex++
 				continue
 			}
 
-			// Ajustar rect para não ultrapassar limites
 			right := left + PX_W
 			bottom := top + PX_H
 
@@ -186,17 +245,14 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 			rect := image.Rect(left, top, right, bottom)
 			cropped := imaging.Crop(img, rect)
 
-			// Verificar se está em branco antes de processar
 			if isImageBlank(cropped, 240) {
 				logInfo("Label %d is blank, skipping", labelIndex)
 				labelIndex++
 				continue
 			}
 
-			// Redimensionar para tamanho exato (PX_W x PX_H)
 			cropped = imaging.Resize(cropped, PX_W, PX_H, imaging.Lanczos)
 
-			// Aplicar margens
 			innerW := PX_W - (2 * MARGIN_PX)
 			innerH := PX_H - (2 * MARGIN_PX)
 
@@ -204,7 +260,6 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 				cropped = imaging.Fit(cropped, innerW, innerH, imaging.Lanczos)
 			}
 
-			// Canvas branco com label centralizada
 			canvas := imaging.New(PX_W, PX_H, color.NRGBA{255, 255, 255, 255})
 			canvas = imaging.PasteCenter(canvas, cropped)
 
@@ -230,6 +285,64 @@ func cropToLabels(pagePng string, outDir string) ([]string, error) {
 
 	logInfo("Cropped into %d non-blank labels from page", len(labels))
 	return labels, nil
+}
+
+// ----------------- FULL PAGE MODE: Resize entire page to fit label -----------
+// This mode does NOT crop - it resizes the entire page proportionally to fit
+// the label size, maintaining aspect ratio and centering on the label.
+func resizeFullPage(pagePng string, outDir string) ([]string, error) {
+	logInfo("FULL PAGE MODE: Resizing page %s to fit label (%.0fx%.0fmm = %dx%d px)...",
+		pagePng, LABEL_W_MM, LABEL_H_MM, PX_W, PX_H)
+
+	img, err := imaging.Open(pagePng)
+	if err != nil {
+		return nil, err
+	}
+
+	b := img.Bounds()
+	pageW := b.Dx()
+	pageH := b.Dy()
+
+	logInfo("Original page dimensions: %dx%d pixels", pageW, pageH)
+	logInfo("Target label size: %dx%d pixels", PX_W, PX_H)
+
+	// Check if page is blank
+	if isImageBlank(img, 240) {
+		logInfo("Page is blank, skipping")
+		return []string{}, nil
+	}
+
+	// Calculate inner area (with margins)
+	innerW := PX_W - (2 * MARGIN_PX)
+	innerH := PX_H - (2 * MARGIN_PX)
+
+	logInfo("Inner area (with margins): %dx%d pixels", innerW, innerH)
+
+	// Resize the ENTIRE page to fit within the inner area, maintaining aspect ratio
+	// imaging.Fit will scale down (or up) to fit within the bounds while preserving aspect ratio
+	resized := imaging.Fit(img, innerW, innerH, imaging.Lanczos)
+
+	resizedBounds := resized.Bounds()
+	logInfo("Resized to: %dx%d pixels", resizedBounds.Dx(), resizedBounds.Dy())
+
+	// Create white canvas at exact label size and paste resized image centered
+	canvas := imaging.New(PX_W, PX_H, color.NRGBA{255, 255, 255, 255})
+	canvas = imaging.PasteCenter(canvas, resized)
+
+	// Encode to PNG
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, canvas); err != nil {
+		return nil, err
+	}
+
+	// Save to output file
+	outPath := filepath.Join(outDir, fmt.Sprintf("%02d_fullpage.png", time.Now().UnixMilli()))
+	if err := ioutil.WriteFile(outPath, buf.Bytes(), 0o644); err != nil {
+		return nil, fmt.Errorf("write fullpage png: %w", err)
+	}
+
+	logInfo("FULL PAGE: Saved %s", outPath)
+	return []string{outPath}, nil
 }
 
 // ----------------- PNG -> TSPL (bitmap) ------------------------------------
@@ -352,14 +465,39 @@ func parseCupsOptions(opts string) {
 			k = strings.ToLower(k)
 			switch k {
 			case "pagesize":
-				v = strings.ToLower(v)
-				v = strings.TrimSuffix(v, "mm")
-				if strings.Contains(v, "x") {
-					w, h := parseTwoFloats(v)
-					LABEL_W_MM = w
-					LABEL_H_MM = h
+				vLower := strings.ToLower(v)
+				// Set label size based on PageSize option
+				switch {
+				case vLower == "a4":
+					// A4: labels will be 10x15cm (after slicing)
+					LABEL_W_MM = 100.0
+					LABEL_H_MM = 150.0
+					logInfo("PageSize=A4 -> Label size 100x150mm")
+				case strings.HasPrefix(vLower, "label4x6"):
+					LABEL_W_MM = 100.0
+					LABEL_H_MM = 150.0
+					logInfo("PageSize=Label4x6 -> Label size 100x150mm")
+				case strings.HasPrefix(vLower, "label3x5"):
+					LABEL_W_MM = 76.0
+					LABEL_H_MM = 127.0
+					logInfo("PageSize=Label3x5 -> Label size 76x127mm")
+				case strings.HasPrefix(vLower, "label2x4"):
+					LABEL_W_MM = 50.0
+					LABEL_H_MM = 100.0
+					logInfo("PageSize=Label2x4 -> Label size 50x100mm")
+				default:
+					// Custom size: try to parse WxH format
+					vClean := strings.TrimSuffix(vLower, "mm")
+					if strings.Contains(vClean, "x") {
+						w, h := parseTwoFloats(vClean)
+						LABEL_W_MM = w
+						LABEL_H_MM = h
+						logInfo("PageSize=%s -> Label size %.0fx%.0fmm", v, w, h)
+					}
 				}
-			case "dpi":
+			case "dpi", "resolution":
+				// Handle "203dpi" or just "203"
+				v = strings.TrimSuffix(strings.ToLower(v), "dpi")
 				DPI = parseInt(v)
 			case "margin":
 				MARGIN_MM = parseFloat(v)
@@ -460,18 +598,33 @@ func modeFilter(argv []string) error {
 
 	recalcPixels()
 
+	// Detect print mode based on PDF page size
+	printMode := detectPrintMode(pdfPath)
+
 	// Render PDF pages
 	pages, err := pdfToPngPages(pdfPath, tmpDir)
 	if err != nil {
 		return fmt.Errorf("pdfToPngPages: %w", err)
 	}
-	logInfo("Filter: pages=%d", len(pages))
+	logInfo("Filter: pages=%d, mode=%s", len(pages), printMode)
 
-	// For each page -> crop -> labels -> tspl -> write to stdout sequentially
+	// For each page -> process according to mode -> tspl -> write to stdout
 	for i, pg := range pages {
-		labels, err := cropToLabels(pg, outDir)
+		var labels []string
+		var err error
+
+		if printMode == "slice" {
+			// SLICE MODE: Crop page into 2x2 grid (4 labels)
+			logInfo("Processing page %d in SLICE MODE...", i+1)
+			labels, err = cropToLabels(pg, outDir)
+		} else {
+			// FULL PAGE MODE: Resize entire page to fit label (no crop)
+			logInfo("Processing page %d in FULL PAGE MODE...", i+1)
+			labels, err = resizeFullPage(pg, outDir)
+		}
+
 		if err != nil {
-			logErr("cropToLabels (%s): %v", pg, err)
+			logErr("process page (%s): %v", pg, err)
 			continue
 		}
 		logInfo("Filter: page %d -> %d labels", i+1, len(labels))
@@ -613,16 +766,31 @@ func modeCLI(pdfPath string, printer string, options string) error {
 	ensureDir(tmpDir)
 	ensureDir(outDir)
 
+	// Detect print mode based on PDF page size
+	printMode := detectPrintMode(pdfPath)
+
 	pages, err := pdfToPngPages(pdfPath, tmpDir)
 	if err != nil {
 		return fmt.Errorf("pdfToPngPages: %w", err)
 	}
 
+	logInfo("CLI: mode=%s, pages=%d", printMode, len(pages))
+
 	total := 0
 	for i, pg := range pages {
-		labels, err := cropToLabels(pg, outDir)
+		var labels []string
+		var err error
+
+		if printMode == "slice" {
+			// SLICE MODE: Crop page into 2x2 grid (4 labels)
+			labels, err = cropToLabels(pg, outDir)
+		} else {
+			// FULL PAGE MODE: Resize entire page to fit label (no crop)
+			labels, err = resizeFullPage(pg, outDir)
+		}
+
 		if err != nil {
-			logErr("cropToLabels: %v", err)
+			logErr("process page: %v", err)
 			continue
 		}
 		for j, lbl := range labels {
@@ -650,36 +818,23 @@ func modeCLI(pdfPath string, printer string, options string) error {
 }
 
 func detectMode() string {
-	// argv[0] pode ser o path completo ou apenas o nome
-	// Para backend CUPS, pode ser "tspl:/dev/usb/lp5" (URI)
 	arg0 := os.Args[0]
 
-	// Se argv[0] contém ":" é provavelmente um URI de backend (tspl:/dev/...)
 	if strings.Contains(arg0, ":") && strings.HasPrefix(arg0, "tspl:") {
 		return "backend"
 	}
 
-	// Extrair apenas o nome do executável (sem path)
 	name := filepath.Base(arg0)
 	name = strings.ToLower(name)
 
-	// Detectar modo pelo nome do executável
-	// Nomes suportados:
-	//   - tspl-backend, tspl (backend CUPS)
-	//   - tspl-filter, tspl-thermal (filtro CUPS)
-	//   - tspldriver ou outros (CLI)
-
-	// Backend: tspl-backend ou tspl (nome curto para backend CUPS)
 	if name == "tspl-backend" || name == "tspl" {
 		return "backend"
 	}
 
-	// Filter: tspl-filter ou tspl-thermal
 	if name == "tspl-filter" || name == "tspl-thermal" {
 		return "filter"
 	}
 
-	// Fallback: detectar por substring (compatibilidade)
 	if strings.Contains(name, "backend") {
 		return "backend"
 	}
@@ -687,8 +842,6 @@ func detectMode() string {
 		return "filter"
 	}
 
-	// Se temos 6+ argumentos e argv[1] é numérico, provavelmente é filtro CUPS
-	// MAS só se argv[0] não for um URI (já tratado acima)
 	if len(os.Args) >= 6 && !strings.Contains(arg0, ":") {
 		if _, err := strconv.Atoi(os.Args[1]); err == nil {
 			return "filter"
@@ -700,7 +853,6 @@ func detectMode() string {
 
 // ----------------- main ------------------------------------------------------
 func main() {
-	// Detectar modo ANTES de flag.Parse() para evitar consumir argumentos do CUPS backend
 	autoMode := detectMode()
 
 	mode := flag.String("mode", autoMode, "mode: cli|filter|backend (auto-detected by executable name if empty)")
@@ -711,12 +863,10 @@ func main() {
 	gap := flag.Float64("gap", 0, "gap mm override")
 	delay := flag.Int("delay", 0, "delay ms override")
 
-	// Para backend e filter, não fazer flag.Parse() pois os argumentos são do CUPS
 	var args []string
 	var finalMode string
 
 	if autoMode == "backend" || autoMode == "filter" {
-		// Não chamar flag.Parse() - os argumentos são do protocolo CUPS
 		finalMode = autoMode
 		args = os.Args[1:]
 	} else {
@@ -774,7 +924,30 @@ func main() {
 		}
 	default: // cli
 		if len(args) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage:\n CLI: tspldriver [--dpi=203 --width=100 --height=150] <pdf> <printer> [options-string]\n")
+			fmt.Fprintf(os.Stderr, `Usage:
+  CLI: tspldriver [options] <pdf> <printer> [cups-options-string]
+
+Options:
+  --dpi=203           Override DPI (default: 200)
+  --width=100         Label width in mm (default: 100)
+  --height=150        Label height in mm (default: 150)
+  --margin=2          Margin in mm (default: 2)
+  --gap=2             Gap between labels in mm (default: 2)
+
+Print Mode (automatic based on PDF page size):
+  - A4 PDF (210x297mm) -> SLICE MODE: sliced into 4 labels (2x2 grid of 10x15cm)
+  - Other sizes        -> FULL PAGE MODE: entire page resized to fit label
+
+Examples:
+  # A4 PDF -> automatically uses SLICE MODE (4 labels per page)
+  tspldriver a4-document.pdf /dev/usb/lp5
+
+  # Label-sized PDF -> automatically uses FULL PAGE MODE
+  tspldriver single-label.pdf /dev/usb/lp5
+
+  # With custom label size
+  tspldriver --width=76 --height=127 label.pdf /dev/usb/lp5
+`)
 			os.Exit(1)
 		}
 		pdfPath := args[0]
