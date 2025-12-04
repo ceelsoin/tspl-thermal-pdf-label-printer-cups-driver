@@ -418,10 +418,15 @@ func modeFilter(argv []string) error {
 		logInfo("CUPS options: %s", options)
 	}
 
-	if len(argv) >= 7 {
-		// File provided as argument
+	if len(argv) >= 7 && argv[6] != "-" {
+		// File provided as argument (not stdin marker)
 		pdfPath = argv[6]
 		logInfo("Input file: %s", pdfPath)
+
+		// Verify file exists
+		if _, err := os.Stat(pdfPath); err != nil {
+			return fmt.Errorf("pdf file not found: %s (%w)", pdfPath, err)
+		}
 	} else {
 		// Read from stdin and save to temp file
 		logInfo("Reading PDF from stdin...")
@@ -440,11 +445,6 @@ func modeFilter(argv []string) error {
 		}
 		logInfo("Saved to temp file: %s", pdfPath)
 		defer os.Remove(pdfPath)
-	}
-
-	// Verify file exists
-	if _, err := os.Stat(pdfPath); err != nil {
-		return fmt.Errorf("pdf file not found: %s (%w)", pdfPath, err)
 	}
 
 	// tmp/out
@@ -503,6 +503,11 @@ func modeFilter(argv []string) error {
 // Backend is invoked by CUPS to send data to the device. When invoked with "list" should list devices.
 // When invoked as job, last argument typically is filename containing data (TSPL) or "-" to read stdin.
 func modeBackend(argv []string) error {
+	logInfo("Backend mode started with %d args", len(argv))
+	for i, arg := range argv {
+		logInfo("  backend argv[%d] = %s", i, arg)
+	}
+
 	// If called as "list" -> list available device URIs that this backend can handle.
 	// We'll look for /dev/usb/lp* or allow env override TSPL_DEVICES
 	if len(argv) > 1 && argv[len(argv)-1] == "list" {
@@ -547,53 +552,26 @@ func modeBackend(argv []string) error {
 	var tspl []byte
 	var err error
 	if filename == "-" || filename == "" {
+		logInfo("Backend: reading TSPL from stdin...")
 		tspl, err = ioutil.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("read stdin: %w", err)
 		}
+		logInfo("Backend: read %d bytes from stdin", len(tspl))
 	} else {
+		logInfo("Backend: reading from file %s", filename)
 		tspl, err = ioutil.ReadFile(filename)
 		if err != nil {
-			logInfo("Backend: file read failed (%v), trying to convert as PDF", err)
-			tmpDir := "/tmp/tspl_pages"
-			outDir := "/tmp/tspl_labels"
-			ensureDir(tmpDir)
-			ensureDir(outDir)
-			recalcPixels()
-			pages, perr := pdfToPngPages(filename, tmpDir)
-			if perr != nil {
-				return fmt.Errorf("read file and convert failed: %w", perr)
-			}
-			var combined bytes.Buffer
-			for _, pg := range pages {
-				labels, cerr := cropToLabels(pg, outDir)
-				if cerr != nil {
-					logErr("cropToLabels: %v", cerr)
-					continue
-				}
-				for _, lbl := range labels {
-					raw, rerr := ioutil.ReadFile(lbl)
-					if rerr != nil {
-						logErr("read label: %v", rerr)
-						continue
-					}
-					ts, terr := pngToTsplFromBuffer(raw)
-					if terr != nil {
-						logErr("pngToTspl: %v", terr)
-						continue
-					}
-					combined.Write(ts)
-					time.Sleep(time.Duration(DELAY_MS) * time.Millisecond)
-				}
-			}
-			tspl = combined.Bytes()
+			return fmt.Errorf("backend: failed to read file %s: %w", filename, err)
 		}
+		logInfo("Backend: read %d bytes from file", len(tspl))
 	}
 
 	if len(tspl) == 0 {
 		return fmt.Errorf("no data to write")
 	}
 
+	// Extract device path from URI if needed
 	if strings.HasPrefix(dev, "tspl:") || strings.HasPrefix(dev, "file:") {
 		parts := strings.SplitN(dev, ":", 2)
 		dev = strings.TrimPrefix(parts[1], "//")
@@ -668,59 +646,80 @@ func modeCLI(pdfPath string, printer string, options string) error {
 }
 
 func detectMode() string {
-	// flags override
-	modeFlag := flag.Lookup("mode")
-	if modeFlag != nil {
-	}
-
 	name := filepath.Base(os.Args[0])
 	name = strings.ToLower(name)
-	if strings.Contains(name, "backend") {
+
+	// Detectar backend pelo nome (incluindo "tspl" que é o nome do backend CUPS)
+	if strings.Contains(name, "backend") || name == "tspl" {
 		return "backend"
 	}
-	if strings.Contains(name, "filter") {
+
+	// Detectar filter pelo nome OU pelo número de argumentos do CUPS
+	// CUPS filter recebe: argv[0]=filter argv[1]=job-id argv[2]=user argv[3]=title argv[4]=copies argv[5]=options [argv[6]=filename]
+	if strings.Contains(name, "filter") || strings.Contains(name, "tspl-thermal") {
 		return "filter"
 	}
+
+	// Se temos 5 ou 6 argumentos numéricos típicos de filtro CUPS
+	if len(os.Args) >= 6 {
+		// Verificar se argv[1] parece ser um job-id (número)
+		if _, err := strconv.Atoi(os.Args[1]); err == nil {
+			return "filter"
+		}
+	}
+
 	return "cli"
 }
 
 // ----------------- main ------------------------------------------------------
 func main() {
-	mode := flag.String("mode", "", "mode: cli|filter|backend (auto-detected by executable name if empty)")
+	// Detectar modo ANTES de flag.Parse() para evitar consumir argumentos do CUPS backend
+	autoMode := detectMode()
+
+	mode := flag.String("mode", autoMode, "mode: cli|filter|backend (auto-detected by executable name if empty)")
 	dpi := flag.Int("dpi", 0, "override dpi")
 	width := flag.Float64("width", 0, "label width mm override")
 	height := flag.Float64("height", 0, "label height mm override")
 	margin := flag.Float64("margin", 0, "margin mm override")
 	gap := flag.Float64("gap", 0, "gap mm override")
 	delay := flag.Int("delay", 0, "delay ms override")
-	flag.Parse()
 
-	// detect mode if not set
-	finalMode := *mode
-	if finalMode == "" {
-		finalMode = detectMode()
-	}
+	// Para backend e filter, não fazer flag.Parse() pois os argumentos são do CUPS
+	var args []string
+	var finalMode string
 
-	args := flag.Args()
+	if autoMode == "backend" || autoMode == "filter" {
+		// Não chamar flag.Parse() - os argumentos são do protocolo CUPS
+		finalMode = autoMode
+		args = os.Args[1:]
+	} else {
+		flag.Parse()
+		// usar o modo detectado ou o modo fornecido via flag
+		finalMode = autoMode
+		if *mode != "" && *mode != autoMode {
+			finalMode = *mode
+		}
+		args = flag.Args()
 
-	// apply CLI overrides
-	if *dpi > 0 {
-		DPI = *dpi
-	}
-	if *width > 0 {
-		LABEL_W_MM = *width
-	}
-	if *height > 0 {
-		LABEL_H_MM = *height
-	}
-	if *margin > 0 {
-		MARGIN_MM = *margin
-	}
-	if *gap > 0 {
-		GAP_MM = *gap
-	}
-	if *delay > 0 {
-		DELAY_MS = *delay
+		// apply CLI overrides (só no modo CLI)
+		if *dpi > 0 {
+			DPI = *dpi
+		}
+		if *width > 0 {
+			LABEL_W_MM = *width
+		}
+		if *height > 0 {
+			LABEL_H_MM = *height
+		}
+		if *margin > 0 {
+			MARGIN_MM = *margin
+		}
+		if *gap > 0 {
+			GAP_MM = *gap
+		}
+		if *delay > 0 {
+			DELAY_MS = *delay
+		}
 	}
 
 	recalcPixels()
