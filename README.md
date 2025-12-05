@@ -343,7 +343,7 @@ MIT License
 
 ## Author
 
-Celso Inacio <celso@enssure.com>
+Celso Inacio 
 
 ---
 

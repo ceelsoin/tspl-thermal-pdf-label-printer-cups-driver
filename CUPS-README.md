@@ -4,13 +4,13 @@ CUPS driver for thermal printers that use TSPL language (such as TSC, Zebra, etc
 
 ## Features
 
-- ✅ Automatic conversion from A4 PDF to 10x15cm labels (4 per page)
-- ✅ Smart printing mode: 2x2 grid slicing (A4) or full page (label sizes)
-- ✅ Smart blank page detection (ignores if < 10% content)
-- ✅ CUPS printing support
-- ✅ Browser preview via CUPS web interface
-- ✅ Multiple label size support (A4, 4x6, 3x5, 2x4)
-- ✅ Automatic margin adjustment
+- Automatic conversion from A4 PDF to 10x15cm labels (4 per page)
+- Smart printing mode: 2x2 grid slicing (A4) or full page (label sizes)
+- Smart blank page detection (ignores if < 10% content)
+- CUPS printing support
+- Browser preview via CUPS web interface
+- Multiple label size support (A4, 4x6, 3x5, 2x4)
+- Automatic margin adjustment
 
 ## Installation
 
@@ -51,10 +51,10 @@ The driver supports two operating modes based on the selected page size:
 
 #### 1. **SLICE MODE** - A4 Page
 When you select **PageSize=A4**:
-- ✂️ The driver slices the A4 page into a 2x2 grid (4 labels of 10x15cm)
-- 🔍 Automatically detects blank labels (< 10% content) and ignores them
-- 📏 Applies safety margins to avoid cuts
-- 📄 Ideal for: A4 PDFs with multiple label layouts
+- The driver slices the A4 page into a 2x2 grid (4 labels of 10x15cm)
+- Automatically detects blank labels (< 10% content) and ignores them
+- Applies safety margins to avoid cuts
+- Ideal for: A4 PDFs with multiple label layouts
 
 **Usage example:**
 ```bash
@@ -63,10 +63,10 @@ lp -d TSPLPrinter -o PageSize=A4 multiple-labels.pdf
 
 #### 2. **FULL PAGE MODE** - Label Sizes
 When you select **Label4x6**, **Label3x5**, or **Label2x4**:
-- 📄 The driver prints the entire page as it appears in the preview
-- 🎯 No slicing - respects exactly what you see in the browser
-- 📐 Proportionally resizes to the selected label size
-- 🖼️ Ideal for: PDFs already formatted for a specific label
+- The driver prints the entire page as it appears in the preview
+- No slicing - respects exactly what you see in the browser
+- Proportionally resizes to the selected label size
+- Ideal for: PDFs already formatted for a specific label
 
 **Usage example:**
 ```bash
